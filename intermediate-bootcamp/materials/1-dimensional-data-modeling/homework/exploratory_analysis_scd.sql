@@ -192,3 +192,106 @@ ORDER BY
 -- Checking Data
 SELECT *
 FROM players_scd
+
+
+/*
+    Managing incremental updates
+*/
+
+-- Create SCD Type
+CREATE TYPE scd_type AS (
+    scoring_class scoring_class,
+    is_active BOOLEAN,
+    start_season INTEGER,
+    end_season INTEGER
+);
+
+
+-- Managing incrementally SCD based on current season 2021
+WITH last_season_scd AS(
+    SELECT *
+    FROM players_scd
+    WHERE current_season = 2021
+    AND end_season = 2021
+),
+historical_scd AS(
+    SELECT 
+        player_name,
+        scoring_class,
+        is_active,
+        start_season,
+        end_season
+    FROM players_scd
+    WHERE current_season = 2021
+    AND end_season < 2021
+),
+current_season_data AS (
+    SELECT *
+    FROM players
+    WHERE current_season = 2022
+),
+unchanged_records AS (
+    SELECT 
+        cs.player_name,
+        cs.scoring_class,
+        cs.is_active,
+        ls.start_season,
+        cs.current_season AS end_season
+    FROM current_season_data cs
+    JOIN last_season_scd ls 
+        ON ls.player_name = cs.player_name
+    WHERE cs.scoring_class = ls.scoring_class
+        AND cs.is_active = ls.is_active
+),
+changed_records AS(
+    SELECT 
+        cs.player_name,
+        UNNEST(
+            ARRAY[
+            ROW(
+                ls.scoring_class,
+                ls.is_active,
+                ls.start_season,
+                ls.end_season
+            )::scd_type,
+            ROW(
+                cs.scoring_class,
+                cs.is_active,
+                cs.current_season,
+                cs.current_season
+            )::scd_type
+        ]) AS records
+    FROM current_season_data cs
+    LEFT JOIN last_season_scd ls 
+        ON ls.player_name = cs.player_name
+    WHERE (cs.scoring_class <> ls.scoring_class
+        OR cs.is_active <> ls.is_active)
+),
+unnested_change_records AS(
+    SELECT
+        player_name,
+        (records::scd_type).scoring_class,
+        (records::scd_type).is_active,
+        (records::scd_type).start_season,
+        (records::scd_type).end_season
+    FROM changed_records
+),
+new_records AS(
+    SELECT 
+        cs.player_name,
+        cs.scoring_class,
+        cs.is_active,
+        cs.current_season AS start_season,
+        cs.current_season AS end_season
+    FROM current_season_data cs 
+    LEFT JOIN last_season_scd ls 
+        ON cs.player_name = ls.player_name
+    WHERE ls.player_name IS NULL
+)
+SELECT * FROM historical_scd
+UNION ALL
+SELECT * FROM unchanged_records
+UNION ALL
+SELECT * FROM unnested_change_records
+UNION ALL
+SELECT * FROM new_records
