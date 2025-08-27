@@ -10,7 +10,7 @@
 -- 1) DDL for actors table
 
 -- Drop TABLE and TYPES
-DROP TABLE actors
+-- DROP TABLE actors
 -- DROP TYPE films
 -- DROP TYPE quality_class
 
@@ -45,67 +45,154 @@ CREATE TABLE actors (
 );
 
 -- 2) Generate cumulative table
-INSERT INTO actors
-WITH yesterday AS (
+-- INSERT INTO actors
+-- WITH yesterday AS (
+--     SELECT *
+--     FROM actors
+--     WHERE current_year = 1972
+-- ),
+-- today AS(
+--     SELECT
+--         actor,
+--         actorid,
+--         year,
+--         ARRAY_AGG(
+--             ROW(film,
+--                 year,
+--                 votes,
+--                 rating,
+--                 filmid
+--             )::films
+--         ) AS films,
+--         AVG(rating) AS rating 
+--     FROM actor_films
+--     WHERE year = 1973
+--     GROUP BY
+--         actor,
+--         actorid,
+--         year
+-- )
+-- SELECT
+--     COALESCE(t.actor,y.actor_name) AS actor_name,
+--     COALESCE(t.actorid,y.actorid) AS actorid,
+--     COALESCE(t.year,y.current_year + 1) AS current_year,
+--     CASE
+--         WHEN y.films IS NULL THEN t.films
+--         WHEN t.films IS NOT NULL THEN y.films || t.films
+--         ELSE y.films
+--     END AS films,
+--     CASE
+--         WHEN t.rating IS NOT NULL THEN
+--             CASE
+--                 WHEN t.rating > 8 THEN 'star'
+--                 WHEN t.rating > 7 THEN 'good'
+--                 WHEN t.rating > 6 THEN 'average'
+--                 ELSE 'bad'
+--             END::quality_class
+--         ELSE y.quality_class
+--     END quality_class,
+--     CASE
+--         WHEN t.year IS NOT NULL THEN TRUE
+--         ELSE FALSE
+--     END is_active
+-- FROM today t
+-- FULL OUTER JOIN yesterday y
+-- ON t.actor = y.actor_name
+--     AND t.actorid = y.actorid;
+
+-- Seed Query with full series
+-- INSERT INTO actors
+WITH year_series aS (
     SELECT *
-    FROM actors
-    WHERE current_year = 1972
+    FROM generate_series(1970,2021) AS year
 ),
-today AS(
-    SELECT
+actors_first_movie_year AS (
+    SELECT 
         actor,
         actorid,
-        year,
-        ARRAY_AGG(
-            ROW(film,
-                year,
-                votes,
-                rating,
-                filmid
-            )::films
-        ) AS films,
-        AVG(rating) AS rating 
+        MIN(year) AS fisrt_movie_year
     FROM actor_films
-    WHERE year = 1973
     GROUP BY
         actor,
-        actorid,
-        year
+        actorid
+),
+actors_and_years AS (
+    SELECT *
+    FROM actors_first_movie_year a
+    JOIN year_series y
+        ON a.fisrt_movie_year <= y.year
+),
+-- single_actor_and_year_films AS(
+--     SELECT
+--         actor,
+--         actorid,
+--         year,
+--         ARRAY_AGG(
+--             ROW(
+--                 film,
+--                 year,
+--                 votes,
+--                 rating,
+--                 filmid
+--             )::films
+--         ) AS films_by_year,
+--         AVG(rating) AS rating 
+--     FROM actor_films
+--     GROUP BY
+--         actor,
+--         actorid,
+--         year        
+-- ),
+windowed AS (
+    SELECT
+        ay.actor AS actor_name,
+        ay.actorid,
+        ay.year AS current_year,
+        ARRAY_REMOVE(
+            ARRAY_AGG(
+                ROW(
+                    af.film,
+                    af.year,
+                    af.votes,
+                    af.rating,
+                    af.filmid
+                )::films
+            ) OVER (PARTITION BY af.actor ORDER BY af.year)
+        ,NULL) AS films
+    FROM actors_and_years ay
+    LEFT JOIN actor_films af 
+        ON ay.actor = af.actor
 )
-SELECT
-    COALESCE(t.actor,y.actor_name) AS actor_name,
-    COALESCE(t.actorid,y.actorid) AS actorid,
-    COALESCE(t.year,y.current_year + 1) AS current_year,
-    CASE
-        WHEN y.films IS NULL THEN t.films
-        WHEN t.films IS NOT NULL THEN y.films || t.films
-        ELSE y.films
-    END AS films,
-    CASE
-        WHEN t.rating IS NOT NULL THEN
-            CASE
-                WHEN t.rating > 8 THEN 'star'
-                WHEN t.rating > 7 THEN 'good'
-                WHEN t.rating > 6 THEN 'average'
-                ELSE 'bad'
-            END::quality_class
-        ELSE y.quality_class
-    END quality_class,
-    CASE
-        WHEN t.year IS NOT NULL THEN TRUE
-        ELSE FALSE
-    END is_active
-FROM today t
-FULL OUTER JOIN yesterday y
-ON t.actor = y.actor_name
-    AND t.actorid = y.actorid
+SELECT *
+FROM windowed
+
+
 
 
 -- Check Table
 SELECT *
 FROM actors
-WHERE current_year = 1973
+WHERE current_year = 1973;
 
+
+-- 3) DDL for actors_history_scd
+-- DROP TABLE actors_history_scd
+
+-- Objective: Track quality_class and is_active
+CREATE TABLE actors_history_scd (
+    actor_name TEXT,
+    actorid TEXT,
+    quality_class quality_class,
+    is_active BOOLEAN,
+    current_year INTEGER,
+    start_date INTEGER,
+    end_date INTEGER,
+    PRIMARY KEY (actor_name,actorid,start_date,end_date)
+);
+
+
+-- Understanding time components series in actor_films
+SELECT MAX(year), MIN(year) FROM actor_films
 
 
 
