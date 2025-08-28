@@ -7,6 +7,10 @@
     data from the actor_films dataset.
 */
 
+-- Data Inspection
+SELECT *
+FROM actor_films
+
 -- 1) DDL for actors table
 
 -- Drop TABLE and TYPES
@@ -122,27 +126,6 @@ actors_and_years AS (
     JOIN year_series y
         ON a.fisrt_movie_year <= y.year
 ),
--- single_actor_and_year_films AS(
---     SELECT
---         actor,
---         actorid,
---         year,
---         ARRAY_AGG(
---             ROW(
---                 film,
---                 year,
---                 votes,
---                 rating,
---                 filmid
---             )::films
---         ) AS films_by_year,
---         AVG(rating) AS rating 
---     FROM actor_films
---     GROUP BY
---         actor,
---         actorid,
---         year        
--- ),
 windowed AS (
     SELECT
         ay.actor AS actor_name,
@@ -157,11 +140,12 @@ windowed AS (
                     af.rating,
                     af.filmid
                 )::films
-            ) OVER (PARTITION BY af.actor ORDER BY af.year)
-        ,NULL) AS films
+            ) OVER (PARTITION BY af.actor ORDER BY af.year),NULL) AS films
     FROM actors_and_years ay
     LEFT JOIN actor_films af 
         ON ay.actor = af.actor
+        AND ay.actorid = af.actorid
+        AND ay.year = af.year
 )
 SELECT *
 FROM windowed
@@ -172,7 +156,6 @@ FROM windowed
 -- Check Table
 SELECT *
 FROM actors
-WHERE current_year = 1973;
 
 
 -- 3) DDL for actors_history_scd
